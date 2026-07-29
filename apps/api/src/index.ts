@@ -257,12 +257,16 @@ function parseRef(owner?: string, name?: string): { owner: string; name: string 
   return { owner, name: cleaned };
 }
 
+/** Pages gives every branch its own preview host, so those are matched by shape not by list. */
+const PREVIEW_ORIGIN = /^https:\/\/[a-z0-9-]+\.burningbranches\.pages\.dev$/;
+
 function corsHeaders(env: Env, origin: string | null): Record<string, string> {
   const allowed = (env.ALLOWED_ORIGINS ?? '')
     .split(',')
     .map((value) => value.trim())
     .filter(Boolean);
-  const match = origin && allowed.includes(origin) ? origin : allowed[0] ?? '*';
+  const permitted = origin !== null && (allowed.includes(origin) || PREVIEW_ORIGIN.test(origin));
+  const match = permitted && origin ? origin : allowed[0] ?? '*';
   return {
     'access-control-allow-origin': match,
     'access-control-allow-methods': 'GET, OPTIONS',

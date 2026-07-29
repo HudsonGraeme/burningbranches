@@ -8,7 +8,7 @@ workers_dev = false
 enabled = true
 
 [vars]
-ALLOWED_ORIGINS = "https://burningbranches.dev,https://www.burningbranches.dev,http://localhost:5173"
+ALLOWED_ORIGINS = "https://burningbranches.dev,https://www.burningbranches.dev,https://burningbranches.pages.dev,http://localhost:5173"
 MAX_PLOTS = "5200"
 
 [[r2_buckets]]
