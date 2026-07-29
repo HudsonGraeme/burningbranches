@@ -5,7 +5,7 @@ import {
   GitHub,
   GitHubError,
   commitDate,
-  type CompareFile,
+  type CompareChange,
 } from './github.js';
 import { buildManifest, emptyStat, type PathStat } from './manifest.js';
 import { buildWindows, ignitionCutoff, recentCutoff, windowCount, type WindowSpec } from './windows.js';
@@ -108,6 +108,7 @@ export async function scanRepo(
       generatedAt: new Date().toISOString(),
       requestsSpent: gh.requests,
       truncatedWindows: changes.truncated,
+      skippedWindows: changes.skipped,
       treeTruncated: tree.truncated,
     },
     windows,
@@ -165,8 +166,9 @@ async function resolveBoundaries(
 }
 
 interface WindowChanges {
-  perWindow: Map<number, CompareFile[]>;
+  perWindow: Map<number, CompareChange[]>;
   truncated: number;
+  skipped: number;
 }
 
 async function collectChanges(
@@ -177,8 +179,9 @@ async function collectChanges(
   boundaries: (string | null)[],
   onProgress: (p: ScanProgress) => void,
 ): Promise<WindowChanges> {
-  const perWindow = new Map<number, CompareFile[]>();
+  const perWindow = new Map<number, CompareChange[]>();
   let truncated = 0;
+  let skipped = 0;
   let done = 0;
 
   const jobs = windows
@@ -188,6 +191,7 @@ async function collectChanges(
   await pool(jobs, POOL, async (job) => {
     const files = await compareDeep(deps, owner, name, job.base, job.head, job.window, 0);
     if (files.truncated) truncated++;
+    if (files.skipped) skipped++;
     perWindow.set(job.window.index, files.files);
     done++;
     onProgress({
@@ -197,7 +201,10 @@ async function collectChanges(
     });
   });
 
-  return { perWindow, truncated };
+  if (skipped > 0) {
+    console.warn(`skipped ${skipped} of ${jobs.length} eras with no common ancestor`);
+  }
+  return { perWindow, truncated, skipped };
 }
 
 async function compareDeep(
@@ -208,16 +215,18 @@ async function compareDeep(
   head: string,
   window: WindowSpec,
   depth: number,
-): Promise<{ files: CompareFile[]; truncated: boolean }> {
+): Promise<{ files: CompareChange[]; truncated: boolean; skipped: boolean }> {
   const { gh, signal } = deps;
-  if (gh.requests > REQUEST_BUDGET) return { files: [], truncated: true };
+  if (gh.requests > REQUEST_BUDGET) return { files: [], truncated: true, skipped: false };
 
   const result = await gh.compare(owner, name, base, head, signal);
+  if (!result) return { files: [], truncated: true, skipped: true };
+
   const files = result.files ?? [];
-  const capped = files.length >= COMPARE_FILE_CAP || result.total_commits >= COMPARE_COMMIT_CAP;
+  const capped = files.length >= COMPARE_FILE_CAP || result.totalCommits >= COMPARE_COMMIT_CAP;
 
   if (!capped || depth >= MAX_SPLIT_DEPTH) {
-    return { files, truncated: capped };
+    return { files, truncated: capped, skipped: false };
   }
 
   // The window is denser than one compare can describe. Split it in time and ask again so
@@ -225,14 +234,17 @@ async function compareDeep(
   const midTime = new Date((window.start.getTime() + window.end.getTime()) / 2);
   const mid = await gh.commitBefore(owner, name, head, midTime, signal);
   if (!mid || mid.sha === base || mid.sha === head) {
-    return { files, truncated: true };
+    return { files, truncated: true, skipped: false };
   }
 
   const left = await compareDeep(deps, owner, name, base, mid.sha, { ...window, end: midTime }, depth + 1);
   const right = await compareDeep(deps, owner, name, mid.sha, head, { ...window, start: midTime }, depth + 1);
+
+  // Half a split failing on a grafted boundary still leaves the other half usable.
   return {
     files: [...left.files, ...right.files],
     truncated: left.truncated || right.truncated,
+    skipped: left.skipped && right.skipped,
   };
 }
 

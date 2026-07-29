@@ -78,32 +78,41 @@ export class ScanJob extends DurableObject<Env> {
   ): Promise<void> {
     try {
       this.pendingViews++;
-      const state = await this.readState();
-      const now = Date.now();
-      const fresh = state !== null && now - state.lastScanAt < REFRESH_INTERVAL_MS;
 
-      if (state && fresh) {
+      // Reading the state, deciding, and claiming the scan must be one indivisible step.
+      // Every await is a yield point, so without this two requests arriving together could
+      // both observe no scan running and both start one, doubling the GitHub cost and
+      // racing each other's writes.
+      const claim = await this.ctx.blockConcurrencyWhile(async () => {
+        const state = await this.readState();
+        const now = Date.now();
+        const fresh = state !== null && now - state.lastScanAt < REFRESH_INTERVAL_MS;
+
+        if (state && fresh) return { kind: 'cached' as const, state, now };
+        if (this.running) return { kind: 'attach' as const };
+
+        this.running = this.run(owner, name, state).finally(() => {
+          this.running = null;
+        });
+        return { kind: 'started' as const };
+      });
+
+      if (claim.kind === 'cached') {
         if (force) {
-          const retryAfter = Math.ceil((state.lastScanAt + REFRESH_INTERVAL_MS - now) / 1000);
+          const retryAfter = Math.ceil(
+            (claim.state.lastScanAt + REFRESH_INTERVAL_MS - claim.now) / 1000,
+          );
           this.send(subscriber, 'throttled', {
             retryAfter,
             message: 'This forest was grown recently. It can be regrown once a day.',
           });
         }
-        this.send(subscriber, 'cached', { at: new Date(state.lastScanAt).toISOString() });
-        this.send(subscriber, 'ready', this.readyPayload(owner, name, state));
+        this.send(subscriber, 'cached', { at: new Date(claim.state.lastScanAt).toISOString() });
+        this.send(subscriber, 'ready', this.readyPayload(owner, name, claim.state));
         return this.close(subscriber);
       }
 
-      if (this.running) {
-        this.send(subscriber, 'progress', this.lastProgress);
-        await this.running;
-        return;
-      }
-
-      this.running = this.run(owner, name, state).finally(() => {
-        this.running = null;
-      });
+      if (claim.kind === 'attach') this.send(subscriber, 'progress', this.lastProgress);
       await this.running;
     } catch (error) {
       this.broadcast('error', toFailure(error));

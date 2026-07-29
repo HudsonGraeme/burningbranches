@@ -43,17 +43,46 @@ export interface TreeResponse {
   truncated: boolean;
 }
 
-export interface CompareFile {
+export type ChangeStatus =
+  | 'added'
+  | 'removed'
+  | 'modified'
+  | 'renamed'
+  | 'copied'
+  | 'changed'
+  | 'unchanged';
+
+interface RawCompareFile {
   filename: string;
   previous_filename?: string;
-  status: 'added' | 'removed' | 'modified' | 'renamed' | 'copied' | 'changed' | 'unchanged';
+  status: ChangeStatus;
+  additions: number;
+  deletions: number;
+  /** Full unified diff text. Enormous, and deliberately never retained. */
+  patch?: string;
+}
+
+interface RawCompareResponse {
+  total_commits: number;
+  files?: RawCompareFile[];
+}
+
+/**
+ * The five fields the biome actually needs. Compare responses carry the entire diff body
+ * per file; holding those across a hundred eras of a large repository is enough to exhaust
+ * an isolate, so the response is projected down the moment it is parsed.
+ */
+export interface CompareChange {
+  filename: string;
+  previous_filename?: string;
+  status: ChangeStatus;
   additions: number;
   deletions: number;
 }
 
-export interface CompareResponse {
-  total_commits: number;
-  files?: CompareFile[];
+export interface CompareResult {
+  totalCommits: number;
+  files: CompareChange[];
 }
 
 const API = 'https://api.github.com';
@@ -62,6 +91,9 @@ const UA = 'burningbranches.dev (+https://github.com/hudsongraeme/burningbranche
 /** Compare stops enumerating files at this count, which is our signal to split a window. */
 export const COMPARE_FILE_CAP = 300;
 export const COMPARE_COMMIT_CAP = 250;
+
+/** Reserve enough of the hourly budget that concurrent scans can still finish. */
+const RATE_FLOOR = 700;
 
 export class GitHub {
   requests = 0;
@@ -88,9 +120,25 @@ export class GitHub {
       const reset = res.headers.get('x-ratelimit-reset');
       if (reset !== null) this.rateReset = Number(reset) * 1000;
 
+      // The request limiter only approximates upstream cost, because a large repository
+      // spends several times what a small one does. This reads the real budget and stops
+      // before it is gone, leaving headroom for scans already in flight.
+      if (this.rateRemaining < RATE_FLOOR) {
+        throw new GitHubError(
+          {
+            code: 'rate_limited',
+            message: 'The GitHub budget is nearly spent. Try again within the hour.',
+          },
+          429,
+        );
+      }
+
       if (res.ok) return { body: (await res.json()) as T, res };
 
       if (res.status === 404) {
+        // Logged because a 404 is not always "no such repository"; callers that know better
+        // catch this, and when one does not the path is the only way to tell them apart.
+        console.warn('github 404', path);
         throw new GitHubError(
           { code: 'not_found', message: 'That repository is not visible from here.' },
           404,
@@ -206,18 +254,40 @@ export class GitHub {
     return body;
   }
 
+  /**
+   * Null means the two commits share no ancestor. Histories that were grafted together, as
+   * React's was, put commits on disjoint roots that are both reachable from the branch but
+   * cannot be diffed. That is a property of the era, not a missing repository, so it is
+   * reported rather than thrown.
+   */
   async compare(
     owner: string,
     name: string,
     base: string,
     head: string,
     signal?: AbortSignal,
-  ): Promise<CompareResponse> {
-    const { body } = await this.call<CompareResponse>(
-      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/compare/${base}...${head}?per_page=${COMPARE_FILE_CAP}`,
-      signal,
-    );
-    return body;
+  ): Promise<CompareResult | null> {
+    try {
+      const { body } = await this.call<RawCompareResponse>(
+        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/compare/${base}...${head}?per_page=${COMPARE_FILE_CAP}`,
+        signal,
+      );
+      const files: CompareChange[] = [];
+      for (const file of body.files ?? []) {
+        const change: CompareChange = {
+          filename: file.filename,
+          status: file.status,
+          additions: file.additions,
+          deletions: file.deletions,
+        };
+        if (file.previous_filename) change.previous_filename = file.previous_filename;
+        files.push(change);
+      }
+      return { totalCommits: body.total_commits, files };
+    } catch (error) {
+      if (error instanceof GitHubError && error.status === 404) return null;
+      throw error;
+    }
   }
 }
 

@@ -1,4 +1,4 @@
-export const MANIFEST_VERSION = 3;
+export const MANIFEST_VERSION = 4;
 
 export const WORLD_SIZE = 1000;
 
@@ -42,6 +42,8 @@ export interface ScanInfo {
   ghostsTracked: number;
   requestsSpent: number;
   truncatedWindows: number;
+  /** Eras whose endpoints shared no ancestor, so their changes could not be read. */
+  skippedWindows: number;
   treeTruncated: boolean;
 }
 

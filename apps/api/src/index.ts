@@ -10,11 +10,13 @@ const NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$/;
 const SHA_PATTERN = /^[0-9a-f]{7,40}$/;
 
 /**
- * A survey costs roughly 250 GitHub requests against a 5,000/hour token, so a little under
- * twenty an hour is the real ceiling. The burst allows a normal cluster of visitors.
+ * Sized against the worst case, not the average. A small repository costs about 25 GitHub
+ * requests but a large one runs to the full per-scan budget of 640, and react does exactly
+ * that, so seven an hour is what a 5,000/hour token actually sustains. The client enforces
+ * a floor on the real remaining budget as well, since this is only an approximation.
  */
-const GLOBAL_SCANS_PER_HOUR = 18;
-const GLOBAL_SCAN_BURST = 24;
+const GLOBAL_SCANS_PER_HOUR = 7;
+const GLOBAL_SCAN_BURST = 10;
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
