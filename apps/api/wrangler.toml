@@ -1,0 +1,37 @@
+name = "burningbranches-api"
+main = "src/index.ts"
+compatibility_date = "2026-07-01"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = false
+
+[observability]
+enabled = true
+
+[vars]
+ALLOWED_ORIGINS = "https://burningbranches.dev,https://www.burningbranches.dev,http://localhost:5173"
+MAX_PLOTS = "5200"
+
+[[r2_buckets]]
+binding = "BIOMES"
+bucket_name = "burningbranches-biomes"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "burningbranches"
+database_id = "9f134a02-1156-49ec-9b4f-9bc62309fc94"
+
+[[durable_objects.bindings]]
+name = "SCAN_JOB"
+class_name = "ScanJob"
+
+[[durable_objects.bindings]]
+name = "LIMITER"
+class_name = "Limiter"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["ScanJob", "Limiter"]
+
+[[routes]]
+pattern = "api.burningbranches.dev"
+custom_domain = true

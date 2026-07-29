@@ -1,0 +1,22 @@
+{
+  "name": "@burningbranches/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --port 8787",
+    "build": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "deploy": "wrangler deploy",
+    "db:init": "wrangler d1 execute burningbranches --remote --file=./schema.sql",
+    "db:init:local": "wrangler d1 execute burningbranches --local --file=./schema.sql"
+  },
+  "dependencies": {
+    "@burningbranches/schema": "workspace:*"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20260721.1",
+    "typescript": "7.0.2",
+    "wrangler": "4.113.0"
+  }
+}
