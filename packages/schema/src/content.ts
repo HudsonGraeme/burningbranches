@@ -71,6 +71,33 @@ export function isGenerated(path: string): boolean {
 }
 
 /**
+ * Git allows a path far longer than anything a person writes, and paths come from whoever
+ * owns the repository. Capping keeps one repository from shipping a manifest padded with
+ * kilobyte filenames.
+ */
+export const MAX_PATH_LENGTH = 260;
+
+/**
+ * Control characters and bidirectional overrides are stripped before any repository owned
+ * string is shown. React already prevents markup from executing; this prevents a filename
+ * from reordering itself on screen to read as something it is not.
+ */
+const UNSAFE_DISPLAY = new RegExp(
+  [
+    '[\\u0000-\\u001f\\u007f-\\u009f]', // C0 and C1 controls
+    '[\\u200b-\\u200f]', // zero width and directional marks
+    '[\\u202a-\\u202e]', // bidi embedding and override
+    '[\\u2066-\\u2069]', // bidi isolates
+    '[\\ufeff]', // zero width no-break space
+  ].join('|'),
+  'g',
+);
+
+export function displayText(value: string): string {
+  return value.replace(UNSAFE_DISPLAY, '');
+}
+
+/**
  * No single file may claim more than this share of the world. A fifteen megabyte log in an
  * otherwise small repository would otherwise erase every other plot on the map.
  */

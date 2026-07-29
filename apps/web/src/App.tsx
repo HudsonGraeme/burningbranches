@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { BiomeManifest, Plot, ScanProgress } from '@burningbranches/schema';
+import {
+  displayText,
+  type BiomeManifest,
+  type Plot,
+  type ScanProgress,
+} from '@burningbranches/schema';
 import {
   API_BASE,
   fetchManifest,
@@ -276,14 +281,14 @@ export default function App() {
               <h2>
                 {manifest.repo.owner}/{manifest.repo.name}
               </h2>
-              {manifest.repo.description && <p className="fine">{manifest.repo.description}</p>}
+              {manifest.repo.description && <p className="fine">{displayText(manifest.repo.description)}</p>}
               <a
                 className="link"
                 href={manifest.repo.htmlUrl}
                 target="_blank"
                 rel="noreferrer noopener"
               >
-                {manifest.repo.branch} at {manifest.repo.headSha.slice(0, 7)}
+                {displayText(manifest.repo.branch)} at {manifest.repo.headSha.slice(0, 7)}
               </a>
             </div>
             <StatsBar manifest={manifest} />

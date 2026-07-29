@@ -4,6 +4,7 @@ import {
   TERRAIN_HINT,
   TERRAIN_LABEL,
   TERRAIN_ORDER,
+  displayText,
   type BiomeManifest,
   type Plot,
 } from '@burningbranches/schema';
@@ -101,7 +102,7 @@ export function PlotTooltip({ plot, x, y }: { plot: Plot; x: number; y: number }
         )}px)`,
       }}
     >
-      <span className="tooltip-path">{plot.path}</span>
+      <span className="tooltip-path">{displayText(plot.path)}</span>
       <span className="tooltip-terrain" style={{ color: hex(TERRAIN_COLOR[plot.biome.terrain]) }}>
         {TERRAIN_LABEL[plot.biome.terrain]}
       </span>
@@ -125,9 +126,14 @@ export function PlotDetail({
   manifest: BiomeManifest;
   onClose: () => void;
 }) {
-  const href = plot.metrics.alive
-    ? `${manifest.repo.htmlUrl}/blob/${manifest.repo.branch}/${plot.path}`
-    : `${manifest.repo.htmlUrl}/commits/${manifest.repo.branch}`;
+  // Paths and branch names come from the repository owner and can hold characters with
+  // meaning in a URL, so each segment is encoded rather than pasted in.
+  const branch = encodeURIComponent(manifest.repo.branch);
+  const aggregate = / \d+ more files$/.test(plot.path);
+  const href =
+    plot.metrics.alive && !aggregate
+      ? `${manifest.repo.htmlUrl}/blob/${branch}/${plot.path.split('/').map(encodeURIComponent).join('/')}`
+      : `${manifest.repo.htmlUrl}/commits/${branch}`;
 
   return (
     <div className="panel detail">
@@ -137,7 +143,7 @@ export function PlotDetail({
       <span className="detail-terrain" style={{ color: hex(TERRAIN_COLOR[plot.biome.terrain]) }}>
         {TERRAIN_LABEL[plot.biome.terrain]}
       </span>
-      <h2>{plot.path}</h2>
+      <h2>{displayText(plot.path)}</h2>
       <p className="fine">{TERRAIN_HINT[plot.biome.terrain]}</p>
       <dl>
         <Row label="First seen" value={years(plot.metrics.ageYears) + ' ago'} />

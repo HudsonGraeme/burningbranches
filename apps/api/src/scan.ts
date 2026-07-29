@@ -1,4 +1,10 @@
-import { isGenerated, type BiomeManifest, type ScanProgress, type TimelineBucket } from '@burningbranches/schema';
+import {
+  MAX_PATH_LENGTH,
+  isGenerated,
+  type BiomeManifest,
+  type ScanProgress,
+  type TimelineBucket,
+} from '@burningbranches/schema';
 import {
   COMPARE_COMMIT_CAP,
   COMPARE_FILE_CAP,
@@ -60,6 +66,7 @@ export async function scanRepo(
   const living = new Map<string, number>();
   for (const entry of tree.tree) {
     if (entry.type !== 'blob') continue;
+    if (entry.path.length > MAX_PATH_LENGTH) continue;
     if (isGenerated(entry.path)) continue;
     living.set(entry.path, entry.size ?? 512);
   }
@@ -274,7 +281,7 @@ function accumulate(
     for (const file of files) {
       const canonical = alias.get(file.filename) ?? file.filename;
       if (file.previous_filename) alias.set(file.previous_filename, canonical);
-      if (isGenerated(canonical)) continue;
+      if (canonical.length > MAX_PATH_LENGTH || isGenerated(canonical)) continue;
 
       let stat = stats.get(canonical);
       if (!stat) {
