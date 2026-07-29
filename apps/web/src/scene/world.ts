@@ -7,6 +7,7 @@ import { buildTerrain, type TerrainHandle } from './terrain.js';
 import { advanceWind, buildTrees, type TreeHandle } from './trees.js';
 import { buildFire, type FireHandle } from './fire.js';
 import { buildSky, type SkyHandle } from './sky.js';
+import { WalkController } from './walk.js';
 
 export interface HoverEvent {
   plot: Plot | null;
@@ -31,12 +32,15 @@ export class World {
   private sky: SkyHandle | null = null;
 
   private frame = 0;
+  private lastFrameAt = performance.now();
   private disposed = false;
   private pointerActive = false;
   private lastHoverId = -3;
+  private walk: WalkController;
 
   onHover: ((event: HoverEvent) => void) | null = null;
   onSelect: ((plot: Plot | null) => void) | null = null;
+  onWalkChange: ((state: { active: boolean; flying: boolean }) => void) | null = null;
 
   constructor(private readonly canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({
@@ -71,6 +75,10 @@ export class World {
     this.sky = buildSky();
     this.scene.add(this.sky.mesh);
 
+    this.walk = new WalkController(this.camera, canvas);
+    this.walk.onExit = () => this.leaveWalk();
+    this.walk.onFlyChange = (flying) => this.onWalkChange?.({ active: true, flying });
+
     canvas.addEventListener('pointermove', this.handlePointerMove);
     canvas.addEventListener('pointerleave', this.handlePointerLeave);
     canvas.addEventListener('click', this.handleClick);
@@ -81,6 +89,7 @@ export class World {
   }
 
   load(manifest: BiomeManifest): void {
+    this.leaveWalk();
     this.clear();
     this.manifest = manifest;
 
@@ -150,6 +159,7 @@ export class World {
   dispose(): void {
     this.disposed = true;
     cancelAnimationFrame(this.frame);
+    this.walk.exit();
     this.clear();
     if (this.sky) {
       this.scene.remove(this.sky.mesh);
@@ -164,16 +174,53 @@ export class World {
     window.removeEventListener('resize', this.handleResize);
   }
 
+  /** Drops the viewer into the map at human scale, looking out from where they were. */
+  enterWalk(): void {
+    if (!this.field || this.walk.isActive) return;
+    this.controls.enabled = false;
+    const from = new THREE.Vector3(
+      this.controls.target.x,
+      sampleHeight(this.field, this.controls.target.x, this.controls.target.z) + 1.72,
+      this.controls.target.z,
+    );
+    this.walk.enter(this.field, from, this.controls.target);
+    this.onWalkChange?.({ active: true, flying: this.walk.isFlying });
+  }
+
+  leaveWalk(): void {
+    if (!this.walk.isActive) return;
+    this.walk.exit();
+    this.controls.enabled = true;
+    if (this.field) {
+      // Return the orbit view to whatever the walker was standing over.
+      const { x, z } = this.camera.position;
+      this.controls.target.set(x, sampleHeight(this.field, x, z), z);
+      this.camera.position.set(x, this.controls.target.y + 320, z + 420);
+      this.controls.update();
+    }
+    this.onWalkChange?.({ active: false, flying: false });
+  }
+
+  get walking(): boolean {
+    return this.walk.isActive;
+  }
+
   private renderLoop = (): void => {
     if (this.disposed) return;
     this.frame = requestAnimationFrame(this.renderLoop);
 
-    const time = (performance.now() - this.startedAt) / 1000;
+    const now = performance.now();
+    const delta = (now - this.lastFrameAt) / 1000;
+    this.lastFrameAt = now;
+
+    const time = (now - this.startedAt) / 1000;
     advanceWind(time);
     if (this.terrain) this.terrain.material.uniforms.uTime!.value = time;
     if (this.fire) this.fire.update(time);
 
-    this.controls.update();
+    if (this.walk.isActive && this.field) this.walk.update(delta, this.field);
+    else this.controls.update();
+
     this.renderer.render(this.scene, this.camera);
   };
 
@@ -186,6 +233,8 @@ export class World {
   };
 
   private handlePointerMove = (event: PointerEvent): void => {
+    // Under pointer lock the cursor has no position, so picking is meaningless.
+    if (this.walk.isActive) return;
     this.pointerActive = true;
     const rect = this.canvas.getBoundingClientRect();
     this.pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
@@ -208,7 +257,7 @@ export class World {
   };
 
   private handleClick = (): void => {
-    if (!this.pointerActive) return;
+    if (this.walk.isActive || !this.pointerActive) return;
     this.onSelect?.(this.pick());
   };
 

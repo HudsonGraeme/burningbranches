@@ -39,6 +39,7 @@ export default function App() {
   const [selected, setSelected] = useState<Plot | null>(null);
   const [recent, setRecent] = useState<RecentRepo[]>([]);
   const [panelsOpen, setPanelsOpen] = useState(true);
+  const [walk, setWalk] = useState({ active: false, flying: true });
 
   useEffect(() => {
     if (!canvasRef.current) return;
@@ -48,6 +49,7 @@ export default function App() {
       setSelected(plot);
       world.highlight(plot);
     };
+    world.onWalkChange = setWalk;
     worldRef.current = world;
     return () => {
       world.dispose();
@@ -118,6 +120,25 @@ export default function App() {
     return () => window.removeEventListener('popstate', fromPath);
   }, [grow]);
 
+  const goHome = (event: React.MouseEvent) => {
+    // Plain left click stays in the app; modified clicks keep their normal browser meaning.
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
+    event.preventDefault();
+    cancelRef.current?.();
+    worldRef.current?.leaveWalk();
+    worldRef.current?.clear();
+    window.history.pushState({}, '', '/');
+    setStatus('idle');
+    setManifest(null);
+    setReady(null);
+    setSelected(null);
+    setError(null);
+    setNote(null);
+    setProgress(null);
+    setInput('');
+    fetchRecent(8).then(setRecent).catch(() => undefined);
+  };
+
   const submit = (event: React.FormEvent) => {
     event.preventDefault();
     const parsed = parseRepoInput(input);
@@ -134,10 +155,10 @@ export default function App() {
       <canvas ref={canvasRef} className="viewport" />
 
       <header className="topbar">
-        <div className="brand">
+        <a className="brand" href="/" onClick={goHome}>
           <span className="mark" />
           <span className="wordmark">burning branches</span>
-        </div>
+        </a>
         <form className="search" onSubmit={submit}>
           <input
             value={input}
@@ -152,6 +173,15 @@ export default function App() {
             {status === 'working' ? 'Growing' : 'Grow'}
           </button>
         </form>
+        {manifest && (
+          <button
+            className="button ghost"
+            onClick={() => worldRef.current?.enterWalk()}
+            title="Explore the forest at human scale"
+          >
+            Walk in
+          </button>
+        )}
         {ready && (
           <button
             className="button ghost"
@@ -214,7 +244,32 @@ export default function App() {
 
       {note && status === 'ready' && <div className="note">{note}</div>}
 
-      {manifest && panelsOpen && (
+      {walk.active && (
+        <>
+          <div className="reticle" />
+          <div className="walk-hud">
+            <span className="walk-keys">
+              <b>WASD</b> move · <b>Mouse</b> look · <b>Ctrl</b> or <b>W W</b> sprint
+            </span>
+            <span className="walk-keys">
+              {walk.flying ? (
+                <>
+                  <b>Space</b> up · <b>Shift</b> down · <b>Space Space</b> to land
+                </>
+              ) : (
+                <>
+                  <b>Space</b> jump · <b>Space Space</b> to fly
+                </>
+              )}
+            </span>
+            <span className="walk-keys muted">
+              <b>Esc</b> to return to the map · you are {walk.flying ? 'flying' : 'walking'}
+            </span>
+          </div>
+        </>
+      )}
+
+      {manifest && panelsOpen && !walk.active && (
         <>
           <aside className="rail left">
             <div className="panel repo">
@@ -252,7 +307,9 @@ export default function App() {
         </>
       )}
 
-      {hover?.plot && !selected && <PlotTooltip plot={hover.plot} x={hover.x} y={hover.y} />}
+      {hover?.plot && !selected && !walk.active && (
+        <PlotTooltip plot={hover.plot} x={hover.x} y={hover.y} />
+      )}
     </div>
   );
 }
