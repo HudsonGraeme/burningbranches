@@ -1,5 +1,7 @@
 # burning branches
 
+[![burning branches](https://api.burningbranches.dev/v1/card/hudsongraeme/burningbranches.png)](https://burningbranches.dev/hudsongraeme/burningbranches)
+
 Grow a forest out of a repository's commit history.
 
 Every file becomes a plot of land on a one square kilometre map. Code nobody has touched in
