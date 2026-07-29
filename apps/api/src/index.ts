@@ -1,20 +1,20 @@
 import { renderCard } from './card.js';
 import { consume } from './limiter.js';
 import { REFRESH_INTERVAL_MS, loadCachedManifest } from './scanjob.js';
-import {
-  bumpViews,
-  cardKey,
-  getRepoRow,
-  manifestKey,
-  recentRepos,
-  repoId,
-  type Env,
-} from './storage.js';
+import { cardKey, getRepoRow, manifestKey, recentRepos, repoId, type Env } from './storage.js';
 
 export { ScanJob } from './scanjob.js';
 export { Limiter } from './limiter.js';
 
 const NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$/;
+const SHA_PATTERN = /^[0-9a-f]{7,40}$/;
+
+/**
+ * A survey costs roughly 250 GitHub requests against a 5,000/hour token, so a little under
+ * twenty an hour is the real ceiling. The burst allows a normal cluster of visitors.
+ */
+const GLOBAL_SCANS_PER_HOUR = 18;
+const GLOBAL_SCAN_BURST = 24;
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -31,8 +31,8 @@ export default {
     try {
       return await route(request, env, ctx, url, origin);
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unexpected failure.';
-      return fail(env, origin, 500, 'internal', message);
+      console.error('request failed', url.pathname, error);
+      return fail(env, origin, 500, 'internal', 'Something went wrong on our side.');
     }
   },
 } satisfies ExportedHandler<Env>;
@@ -122,12 +122,27 @@ async function route(
 
       if (!cachedFresh || force) {
         const ip = request.headers.get('cf-connecting-ip') ?? 'anonymous';
-        const gate = await consume(env, `ip:${ip}`, { capacity: 12, refill: 0.05, cost: 1 });
-        if (!gate.allowed) {
+        const perIp = await consume(env, `ip:${ip}`, { capacity: 12, refill: 0.05, cost: 1 });
+        if (!perIp.allowed) {
           // EventSource cannot read a non-2xx body, so the reason has to arrive as a frame.
           return eventStream(env, origin, 'error', {
             code: 'rate_limited',
-            message: `Too many surveys from this address. Try again in ${gate.retryAfter}s.`,
+            message: `Too many surveys from this address. Try again in ${perIp.retryAfter}s.`,
+          });
+        }
+
+        // Per-address limits do nothing against a spread-out burst, and every survey draws
+        // on one shared GitHub budget. This ceiling is what keeps that budget from being
+        // drained to zero, which would take scanning down for everyone.
+        const global = await consume(env, 'global:scan', {
+          capacity: GLOBAL_SCAN_BURST,
+          refill: GLOBAL_SCANS_PER_HOUR / 3600,
+          cost: 1,
+        });
+        if (!global.allowed) {
+          return eventStream(env, origin, 'error', {
+            code: 'rate_limited',
+            message: 'Too many new forests are being grown right now. Try again shortly.',
           });
         }
       }
@@ -143,7 +158,6 @@ async function route(
       for (const [key, value] of Object.entries(corsHeaders(env, origin))) {
         headers.set(key, value);
       }
-      ctx.waitUntil(bumpViews(env, ref.owner, ref.name).catch(() => undefined));
       return new Response(response.body, { status: response.status, headers });
     }
 
@@ -155,6 +169,9 @@ async function route(
       const row = await getRepoRow(env, ref.owner, ref.name);
       if (!row) return fail(env, origin, 404, 'not_found', 'That forest has not been grown yet.');
 
+      if (sha && !SHA_PATTERN.test(sha)) {
+        return fail(env, origin, 400, 'bad_request', 'That is not a commit.');
+      }
       const key =
         sha && sha !== row.head_sha ? manifestKey(ref.owner, ref.name, sha) : row.manifest_key;
 

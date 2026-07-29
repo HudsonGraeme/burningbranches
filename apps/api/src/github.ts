@@ -136,7 +136,7 @@ export class GitHub {
   }
 
   async repo(owner: string, name: string, signal?: AbortSignal): Promise<RepoResponse> {
-    const { body } = await this.call<RepoResponse>(`/repos/${owner}/${name}`, signal);
+    const { body } = await this.call<RepoResponse>(`/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`, signal);
     return body;
   }
 
@@ -151,7 +151,7 @@ export class GitHub {
     signal?: AbortSignal,
   ): Promise<{ head: CommitSummary; count: number }> {
     const { body, res } = await this.call<CommitSummary[]>(
-      `/repos/${owner}/${name}/commits?sha=${encodeURIComponent(branch)}&per_page=1`,
+      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/commits?sha=${encodeURIComponent(branch)}&per_page=1`,
       signal,
     );
     const head = body[0];
@@ -172,7 +172,7 @@ export class GitHub {
     signal?: AbortSignal,
   ): Promise<CommitSummary | null> {
     const { body } = await this.call<CommitSummary[]>(
-      `/repos/${owner}/${name}/commits?sha=${encodeURIComponent(branch)}&per_page=1&page=${page}`,
+      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/commits?sha=${encodeURIComponent(branch)}&per_page=1&page=${page}`,
       signal,
     );
     return body[0] ?? null;
@@ -187,7 +187,7 @@ export class GitHub {
     signal?: AbortSignal,
   ): Promise<CommitSummary | null> {
     const { body } = await this.call<CommitSummary[]>(
-      `/repos/${owner}/${name}/commits?sha=${encodeURIComponent(branch)}&per_page=1&until=${until.toISOString()}`,
+      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/commits?sha=${encodeURIComponent(branch)}&per_page=1&until=${until.toISOString()}`,
       signal,
     );
     return body[0] ?? null;
@@ -200,7 +200,7 @@ export class GitHub {
     signal?: AbortSignal,
   ): Promise<TreeResponse> {
     const { body } = await this.call<TreeResponse>(
-      `/repos/${owner}/${name}/git/trees/${sha}?recursive=1`,
+      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/git/trees/${sha}?recursive=1`,
       signal,
     );
     return body;
@@ -214,7 +214,7 @@ export class GitHub {
     signal?: AbortSignal,
   ): Promise<CompareResponse> {
     const { body } = await this.call<CompareResponse>(
-      `/repos/${owner}/${name}/compare/${base}...${head}?per_page=${COMPARE_FILE_CAP}`,
+      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/compare/${base}...${head}?per_page=${COMPARE_FILE_CAP}`,
       signal,
     );
     return body;

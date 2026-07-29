@@ -75,6 +75,7 @@ export async function recordScan(
   manifest: BiomeManifest,
   key: string,
   headCommittedAt: string,
+  views: number,
 ): Promise<void> {
   const summary = summarize(manifest);
   const id = repoId(manifest.repo.owner, manifest.repo.name);
@@ -83,7 +84,7 @@ export async function recordScan(
        id, owner, name, branch, head_sha, head_committed_at, first_commit_at,
        last_scan_at, scan_count, plots, ghosts, stars, burning, canopy_share,
        oldest_years, views, manifest_key
-     ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,1,?9,?10,?11,?12,?13,?14,0,?15)
+     ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,1,?9,?10,?11,?12,?13,?14,?16,?15)
      ON CONFLICT(id) DO UPDATE SET
        branch=excluded.branch,
        head_sha=excluded.head_sha,
@@ -97,6 +98,7 @@ export async function recordScan(
        burning=excluded.burning,
        canopy_share=excluded.canopy_share,
        oldest_years=excluded.oldest_years,
+       views=repos.views + ?16,
        manifest_key=excluded.manifest_key`,
   )
     .bind(
@@ -115,6 +117,7 @@ export async function recordScan(
       summary.canopyShare,
       summary.oldestYears,
       key,
+      Math.max(0, Math.trunc(views)),
     )
     .run();
 }
@@ -123,12 +126,6 @@ export async function getRepoRow(env: Env, owner: string, name: string): Promise
   return env.DB.prepare('SELECT * FROM repos WHERE id = ?1')
     .bind(repoId(owner, name))
     .first<RepoRow>();
-}
-
-export async function bumpViews(env: Env, owner: string, name: string): Promise<void> {
-  await env.DB.prepare('UPDATE repos SET views = views + 1 WHERE id = ?1')
-    .bind(repoId(owner, name))
-    .run();
 }
 
 export async function recentRepos(env: Env, limit: number): Promise<RepoRow[]> {

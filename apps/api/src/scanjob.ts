@@ -32,6 +32,13 @@ export class ScanJob extends DurableObject<Env> {
   private running: Promise<void> | null = null;
   private lastProgress: ScanProgress = { phase: 'queued', pct: 0, message: 'Queued' };
 
+  /**
+   * Views are counted in memory and only flushed when a survey is recorded. Writing per
+   * request would let anyone reloading a cached forest drive unbounded database writes, and
+   * losing a few counts when the object is evicted costs nothing.
+   */
+  private pendingViews = 0;
+
   override async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
     const owner = url.searchParams.get('owner') ?? '';
@@ -70,6 +77,7 @@ export class ScanJob extends DurableObject<Env> {
     subscriber: Subscriber,
   ): Promise<void> {
     try {
+      this.pendingViews++;
       const state = await this.readState();
       const now = Date.now();
       const fresh = state !== null && now - state.lastScanAt < REFRESH_INTERVAL_MS;
@@ -142,7 +150,8 @@ export class ScanJob extends DurableObject<Env> {
 
       this.progress({ phase: 'growing', pct: 0.94, message: 'Storing the survey' });
       const key = await putManifest(this.env, manifest);
-      await recordScan(this.env, manifest, key, headCommittedAt);
+      await recordScan(this.env, manifest, key, headCommittedAt, this.pendingViews);
+      this.pendingViews = 0;
 
       const next: JobState = {
         lastScanAt: Date.now(),
@@ -214,10 +223,10 @@ export class ScanJob extends DurableObject<Env> {
 
 function toFailure(error: unknown): ScanFailure {
   if (error instanceof GitHubError) return error.failure;
-  return {
-    code: 'internal',
-    message: error instanceof Error ? error.message : 'The survey failed.',
-  };
+  // Only messages this code authored are safe to hand back. Raw exception text can carry
+  // internal detail, so it goes to the log and the caller gets a fixed string.
+  console.error('scan failed', error);
+  return { code: 'internal', message: 'The survey failed unexpectedly.' };
 }
 
 export async function loadCachedManifest(env: Env, owner: string, name: string) {
